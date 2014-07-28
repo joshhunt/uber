@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+        <meta charset="utf-8">
+        <title>Uber Trips</title>
+        <style>
+            html, body, #map-canvas {
+                height: 100%;
+                margin: 0px;
+                padding: 0px
+            }
+        </style>
+        <script src="https://maps.googleapis.com/maps/api/js?v=3.exp"></script>
+        <script src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
+        <script>
+
+            var trips = {{{uberTrips}}}
+
+        </script>
+        <script>
+            var PATH_PIN = 'M0-165c-27.618 0-50 21.966-50 49.054C-50-88.849 0 0 0 0s50-88.849 50-115.946C50-143.034 27.605-165 0-165z',
+                USD_TO_AUD = 1.07;
+            var markers = {},
+                tripsByType = {};
+
+            var $infoWindowContent = $('<div>Driver <strong class="driver"></strong> in <strong class="car"></strong><br/> Date: <strong class="date"></strong><br/> Rating: <strong><span  class="rating"></span> stars</strong> out of 5<br/> Price: <strong class="price"></strong> (avg <strong>$<span class="pricePerKm"></span>/km</strong>)<br/> Distance: <strong><span class="distance"></span> km</strong></div>');
+
+            var distance = function (lat1, lon1, lat2, lon2) {
+                var R = 6371;
+                var a =
+                    0.5 - Math.cos((lat2 - lat1) * Math.PI / 180)/2 +
+                    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                    (1 - Math.cos((lon2 - lon1) * Math.PI / 180))/2;
+
+                return R * 2 * Math.asin(Math.sqrt(a));
+            }
+
+            var distanceForTrip = function(trip) {
+                var tripDistance = 0,
+                    path = trip.journey;
+
+                for (var i = path.length - 2; i >= 0; i--) {
+                    var pair1 = path[i];
+                    var pair2 = path[i + 1];
+                    tripDistance += distance(pair1[0], pair1[1], pair2[0], pair2[1]);
+                };
+
+                return tripDistance
+            }
+
+            var getTrip = function(tripID) {
+                for (index in trips) {
+                    if (trips[index].id === tripID) return trips[index]
+                }
+            }
+
+            var parseMoney = function(str) {
+                var splut = str.split('$'),
+                    currency = splut[0].toLowerCase().indexOf('us'),
+                    money = parseInt(splut[splut.length - 1]);
+
+                if (currency > -1 ) money = money * USD_TO_AUD;
+                return money
+            }
+
+            var initialize = function() {
+                var myOptions = {
+                    zoom: 12,
+                    center: new google.maps.LatLng(-33.859972, 151.209444),
+                    mapTypeId: google.maps.MapTypeId.ROADMAP,
+                    styles: [{"featureType":"landscape","stylers":[{"saturation":-100},{"lightness":65},{"visibility":"on"}]},{"featureType":"poi","stylers":[{"saturation":-100},{"lightness":51},{"visibility":"simplified"}]},{"featureType":"road.highway","stylers":[{"saturation":-100},{"visibility":"simplified"}]},{"featureType":"road.arterial","stylers":[{"saturation":-100},{"lightness":30},{"visibility":"on"}]},{"featureType":"road.local","stylers":[{"saturation":-100},{"lightness":40},{"visibility":"on"}]},{"featureType":"transit","stylers":[{"saturation":-100},{"visibility":"simplified"}]},{"featureType":"administrative.province","stylers":[{"visibility":"off"}]},{"featureType":"water","elementType":"labels","stylers":[{"visibility":"on"},{"lightness":-25},{"saturation":-100}]},{"featureType":"water","elementType":"geometry","stylers":[{"hue":"#ffff00"},{"lightness":-25},{"saturation":-97}]}]
+                };
+
+                var map = new google.maps.Map(document.getElementById('map-canvas'), myOptions);
+                window.map = map;
+
+                for (tripID in trips) {
+                    trip = trips[tripID];
+
+                    if(!tripsByType[trip.car]){ tripsByType[trip.car] = {} }
+                    tripsByType[trip.car][tripID] = trip;
+
+                    _setMapTo = function(_trip, value) {
+                        _trip.gmapPath.setMap(value);
+                        for(markerType in _trip.markers) {
+                            _trip.markers[markerType].setMap(value);
+                        }
+                    }
+
+                    trip.hide = function() { _setMapTo(this, null) };
+                    trip.show = function() { _setMapTo(this, window.map) };
+                }
+
+                drawAllJourneys();
+                addStartMarkers();
+                addEndMarkers();
+                setupUI();
+            }
+
+            var addStartMarkers = function() { addMarkers('start'); }
+            var addEndMarkers = function() { addMarkers('end'); }
+
+            var removeMarkers = function(direction) {
+                var _remove = function(marker){
+                    marker.setMap(null);
+                }
+
+                if (direction) {
+                    markers[direction].forEach(_remove)
+                } else {
+                    var keys = Object.keys(markers);
+                    keys.forEach(function(key) {
+                        markers[key].forEach(_remove);
+                    })
+                }
+            }
+
+            var addMarkers = function(direction) {
+                var isStart = direction === 'start',
+                    color = isStart ? '#7ED321' : '#D0021B',
+                    pathNum;
+
+                if (!markers[direction]) { markers[direction] = []; }
+
+                for (tripIndex in trips) {
+                    trip = trips[tripIndex];
+                    pathNum = isStart ? 0 : trip.journey.length - 1;
+                    var latlong = trip.journey[pathNum];
+
+                    var marker = new google.maps.Marker({
+                        position: new google.maps.LatLng(latlong[0], latlong[1]),
+                        map: map,
+                        icon: {
+                            path: PATH_PIN,
+                            fillColor: color,
+                            strokeColor: color,
+                            scale: .075,
+                            strokeOpacity: 1,
+                            fillOpacity: 1
+                        },
+                        title: trip.id
+                    });
+
+                    markers[direction].push(marker);
+                    if(!trip.markers) { trip.markers = {}; };
+                    trip.markers[direction] = marker;
+                    google.maps.event.addListener(marker, 'click', displayWindow);
+                }
+            };
+
+            var drawJourney = function(tripID) {
+                var trip = trips[tripID],
+                    path = [],
+                    latlong, tripPath;
+
+                for(index in trip.journey) {
+                    latlong = trip.journey[index];
+                    path.push(new google.maps.LatLng(latlong[0], latlong[1]));
+                }
+
+                tripPath = new google.maps.Polyline({
+                    path: path,
+                    geodesic: true,
+                    strokeColor: "#120AC1",
+                    strokeOpacity: .35,
+                    strokeWeight: 2
+                });
+
+                tripPath.setMap(map);
+                trip.gmapPath = tripPath;
+            }
+
+            var drawAllJourneys = function() {
+                for (tripID in trips) {
+                    drawJourney(tripID);
+                }
+            };
+
+            var infoWindow = new google.maps.InfoWindow({content: ''})
+
+            var redrawAll = function() {
+                var enabled, trip
+                    checked = $('.byType :checked').map(function(){
+                        return $(this).attr('name')
+                    }).toArray();
+
+                for (tripID in trips) {
+                    trip = trips[tripID];
+                    enabled = checked.indexOf(trip.car) > -1;
+
+                    if(enabled) {
+                        trip.show();
+                        trip.gmapPath.setOptions({strokeOpacity: .35});
+                    }
+                    else { trip.hide(); }
+                }
+
+                infoWindow.close();
+            }
+
+            google.maps.event.addListener(infoWindow,'closeclick', redrawAll);
+
+            var displayWindow = function() {
+                // debugger;
+                var tripID = this.title,
+                    trip = getTrip(tripID),
+                    distance = distanceForTrip(trip),
+                    pricePerKm = parseMoney(trip.fare.total) / distance;
+
+                $infoWindowContent.find('.driver').text(trip.driverName);
+                $infoWindowContent.find('.car').text(trip.car);
+                $infoWindowContent.find('.date').text(trip.date);
+                $infoWindowContent.find('.price').text(trip.fare.total);
+                $infoWindowContent.find('.rating').text(trip.rating);
+                $infoWindowContent.find('.distance').text(distance.toFixed(2));
+                $infoWindowContent.find('.pricePerKm').text(pricePerKm.toFixed(2));
+
+                infoWindow.content = $infoWindowContent[0];
+                infoWindow.open(window.map, this);
+                trip.gmapPath.setOptions({strokeOpacity: 1});
+
+                for (tripNum in trips) {
+                    trip = trips[tripNum]
+                    if (trip.id !== tripID) {
+                        trip.hide();
+                    }
+                }
+            };
+
+            var statsForTrips = function(_trips) {
+                var totalTrips = Object.keys(_trips).length,
+                    totalRatings = 0,
+                    totalPrice = 0,
+                    tripDates = [],
+                    totalDistance = 0,
+                    $template, id, trip;
+
+                for (tripID in _trips) {
+                    var trip = _trips[tripID];
+                    tripDates.push(new Date(trip.date));
+                    totalRatings += trip.rating;
+                    price = parseMoney(trip.fare.total);
+                    totalPrice += price;
+                    totalDistance += distanceForTrip(trip);
+                }
+
+                var avgPrice = totalPrice / totalTrips,
+                    avgRating = totalRatings / totalTrips,
+                    avgDistance = totalDistance / totalTrips,
+                    avgPricePerKM = totalPrice / totalDistance;
+
+                tripDates.sort(function(a,b){ return b - a; });
+                tripDates.reverse();
+
+                $summary = $('.summary');
+
+                return {
+                    count: totalTrips,
+                    firstTrip: tripDates[0].toDateString(),
+                    totalPrice: totalPrice,
+                    avgPrice: avgPrice.toFixed(2),
+                    avgRating: avgRating.toFixed(2),
+                    totalDistance: totalDistance.toFixed(2),
+                    avgDistance: avgDistance.toFixed(2),
+                    avgPricePerKM: avgPricePerKM.toFixed(2)
+                }
+            }
+
+            var renderStats = function(_stats) {
+                var $stats = $('.templates .stats').clone();
+                $stats.find('.count').text(_stats.count);
+                $stats.find('.firstTrip').text(_stats.firstTrip);
+                $stats.find('.totalPrice').text(_stats.totalPrice);
+                $stats.find('.avgPrice').text(_stats.avgPrice);
+                $stats.find('.avgRating').text(_stats.avgRating);
+                $stats.find('.totalDistance').text(_stats.totalDistance);
+                $stats.find('.avgDistance').text(_stats.avgDistance);
+                $stats.find('.pricePerKm').text(_stats.avgPricePerKM);
+                return $stats;
+            }
+
+            var setupUI = function() {
+                var stats = statsForTrips(trips);
+                $('.summary__stats').append(renderStats(stats));
+
+                $tripType = $('.tripType');
+                $byType = $('.byType');
+
+                Object.keys(tripsByType).forEach(function(type) {
+                    var id = 'type-' + type;
+                    var typeStats = statsForTrips(tripsByType[type]);
+
+                    $template = $tripType.clone();
+                    $template.find('input').attr('id', id);
+                    $template.find('input').attr('name', type);
+                    $template.find('label').attr('for', id);
+                    $template.find('.type').text(type);
+
+                    $template.find('.type__stats').append(renderStats(typeStats));
+                    $byType.append($template);
+                })
+
+                $byType.find('input').on('change', redrawAll);
+            }
+
+            google.maps.event.addDomListener(window, 'load', initialize);
+
+        </script>
+
+        <style>
+            body {
+                font-family: 'Open Sans', 'Helvetica', sans-serif;
+                font-size: 12px;
+            }
+
+            .summary {
+                position: absolute;
+                top: 0;
+                background: white;
+                padding: 15px;
+                right: 0;
+            }
+
+            .summary h2 {
+                margin: 0 0 10px 0;
+            }
+
+            .summary h3 {
+                margin: 0;
+            }
+
+            .summary label {
+                font-size: 1.1em;
+                font-weight: 600;
+            }
+
+            .tripType { margin-bottom: 15px; }
+
+            .type__stats {
+                margin-left: 15px;
+                font-size: 11px;
+            }
+
+            .hidden { display: none; }
+        </style>
+    </head>
+    <body>
+        <div id="map-canvas"></div>
+        <div class="summary">
+            <!-- <h2>Summary:</h2> -->
+            <div class="summary__stats"></div>
+            <br/>
+            <h3>By Type</h3>
+            <div class="byType"></div>
+
+        </div>
+        <div class="hidden templates">
+            <div class="stats">
+                Total of <strong class='count'></strong> trips since <strong class='firstTrip'></strong><br/>
+                In total, spent <strong>$<span class='totalPrice'></span></strong> (avg of <strong>$<span class="avgPrice"></span>/trip</strong>, <strong>$<span class="pricePerKm"></span>/km</strong>)<br/>
+                Average rating was <strong><span class="avgRating"></span> stars</strong> out of 5<br/>
+                Traveled <strong><span class="totalDistance"></span> km</strong> in total (avg <strong><span class="avgDistance"></span> km</strong>)
+            </div>
+
+            <div class="tripType">
+                <input type="checkbox" checked>
+                <label> <span class='type'></span></label>
+                <div class="type__stats"></div>
+            </div>
+        </div>
+    </body>
+</html>
