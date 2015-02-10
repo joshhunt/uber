@@ -1,3 +1,5 @@
+**Note: This is no longer being maintained. Please see [https://github.com/chriswhong/uber-trip-script](https://github.com/chriswhong/uber-trip-script) for working fork.**
+
 # #uberdata trip scraper
 
 Really quick and dirty scraper that pulls your trip data from Uber, saves it as JSON and makes a map for you.
