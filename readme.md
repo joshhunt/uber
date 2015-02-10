@@ -18,4 +18,4 @@ Just run `npm install` and probably `npm install -g coffee-script` to install de
 
 `Username` and `password` are pretty self explanatory, `tripPages` is the max number of trips pages you have at `https://riders.uber.com/trip`
 
-Then run with `coffee app.coffee`. Lots of progress logs are shown. At the end, it will generate a map.html with all your data (JSON will be embedded in that as a JS object in an inline `<script>` tag).
+Then run with `node app.js`. Lots of progress logs are shown. At the end, it will generate a map.html with all your data (JSON will be embedded in that as a JS object in an inline `<script>` tag).
